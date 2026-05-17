@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Code Agent</title>
+
+  <!-- Highlight.js — подсветка кода -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+
+  <!-- Marked — markdown рендер -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h1>Code Agent</h1>
+        <button id="new-chat-btn" class="primary-btn">+ New chat</button>
+      </div>
+      <div class="sidebar-section-title">Беседы</div>
+      <div id="conversation-list" class="conversation-list"></div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="topbar-title">Локальный AI-агент</div>
+        <div class="topbar-subtitle" id="conversation-label">Выбери или создай беседу</div>
+      </header>
+
+      <section id="messages" class="messages"></section>
+
+      <footer class="composer">
+        <div class="composer-inner">
+          <textarea
+            id="message-input"
+            placeholder="Напиши задачу для агента... (Ctrl+Enter — отправить)"
+          ></textarea>
+          <button id="send-btn" class="primary-btn send-btn">↑</button>
+        </div>
+        <div class="composer-hint">Ctrl+Enter — отправить</div>
+      </footer>
+    </main>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

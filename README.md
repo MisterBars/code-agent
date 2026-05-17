@@ -55,7 +55,7 @@ pip install -r requirements.txt
 
 Убедись, что Ollama запущен:
 ```bash
-ollama serve
+ollama server
 ```
 
 Запустить агента:
@@ -105,3 +105,20 @@ DEFAULT_MODEL = "qwen2.5-coder:14b"
 
 Архитектура и карточки модулей/классов в Obsidian Vault:  
 [MisterBars/MyVault → 10 Projects/code-agent](https://github.com/MisterBars/MyVault/tree/main/10%20Projects/code-agent)
+
+## Web UI
+
+Запуск локального веб-интерфейса:
+
+```bash
+uvicorn app:app --reload
+```
+
+Открыть в браузере:
+[http://127.0.0.1:8000](http://127.0.0.1:8000)
+
+Что умеет первая версия:
+- список бесед
+- создание новой беседы
+- отправка задач агенту
+- просмотр сообщений по ролям: user / planner / worker / orchestrator
