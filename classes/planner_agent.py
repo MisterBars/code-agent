@@ -45,7 +45,6 @@ def plan(task: UserTask, context: dict = None, model: str = None) -> PlanResult:
     raw = ollama_client.ask(prompt, model=model, system=SYSTEM_PROMPT)
     return _parse_plan_result(raw)
 
-
 def replan(step_id: str, feedback: str, original_goal: str,
            context: dict = None, model: str = None) -> PlanResult:
     """
@@ -103,7 +102,7 @@ def _parse_plan_result(raw: str) -> PlanResult:
             plan_id=str(uuid.uuid4())[:8],
             goal=data.get("goal", ""),
             steps=steps,
-            reasoning_summary=data.get("reasoning", ""),
+            reasoning_summary=data.get("direct_answer") or data.get("reasoning") or data.get("output") or "",
             done=data.get("done", False),
             needs_worker=not data.get("done", False),
         )

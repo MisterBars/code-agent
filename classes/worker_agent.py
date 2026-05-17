@@ -9,24 +9,21 @@ from modules import ollama_client, logger
 from classes.types import PlanStep, WorkerResult
 
 
-SYSTEM_PROMPT = """Ты — агент-исполнитель. Твоя задача — выполнить конкретный шаг.
+SYSTEM_PROMPT = """Ты — агент-исполнитель. Твоя задача — выполнить конкретный шаг и дать полезный ответ.
 
 Правила:
-- Выполни шаг максимально точно
-- Если шаг слишком сложный или требует разбивки — верни needs_replan с причиной
+- Выполни шаг и напиши конкретный результат в поле output — объяснение, пример кода или данные
+- Поле output НИКОГДА не должно быть пустым при status=done
+- Если шаг требует разбивки на несколько независимых частей — верни needs_replan
+- Не возвращай needs_replan если можешь дать хоть какой-то полезный ответ
 - Возвращай ТОЛЬКО валидный JSON, без пояснений и markdown
 
 Формат ответа:
 {
   "status": "done",
-  "output": "результат выполнения",
+  "output": "конкретный результат выполнения шага — текст, код или объяснение",
   "reason": ""
 }
-
-Статусы:
-- done — шаг выполнен
-- failed — не получилось, но это финально
-- needs_replan — шаг слишком сложный, нужна декомпозиция
 """
 
 
@@ -42,7 +39,6 @@ def solve_subtask(step: PlanStep, context: dict = None, model: str = None) -> Wo
 
     raw = ollama_client.ask(prompt, model=model, system=SYSTEM_PROMPT)
     return _parse_worker_result(raw, step.step_id)
-
 
 def _build_prompt(step: PlanStep, context: dict) -> str:
     parts = [

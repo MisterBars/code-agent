@@ -58,8 +58,10 @@ def run(task: UserTask, context: dict = None) -> OrchestratorResult:
 
         if result.status == "done":
             steps_completed += 1
-            all_outputs.append(f"{step.title}: {result.output}")
-            logger.info(f"[Orchestrator] Шаг '{step.title}' выполнен.")
+            output_text = _normalize_output(result.output)
+            if output_text:
+                all_outputs.append(output_text)
+            logger.info(...)
 
         elif result.status == "needs_replan":
             replans += 1
@@ -78,14 +80,21 @@ def run(task: UserTask, context: dict = None) -> OrchestratorResult:
 
             new_plan = planner_agent.replan(step.step_id, result.reason or "", goal, context)
             _store(conv_id, "planner", f"[ПЕРЕПЛАН] {new_plan.goal}")
+            all_outputs.clear()
             current_steps = new_plan.steps[:MAX_STEPS] + current_steps
 
         elif result.status == "failed":
             logger.warn(f"[Orchestrator] Шаг '{step.title}' завершился с ошибкой: {result.error}")
-            all_outputs.append(f"{step.title}: ОШИБКА — {result.error}")
+            if result.output.strip():
+                all_outputs.append(result.output.strip())
 
     # ── Шаг 3: Финальный ответ ────────────────────────────────
-    final = "\n".join(all_outputs) if all_outputs else "Задача выполнена."
+    # Фильтруем пустые строки и собираем осмысленный ответ
+    non_empty = [o for o in all_outputs if o.strip() and not o.endswith(": ")]
+    if non_empty:
+        final = "\n\n".join(non_empty)
+    else:
+        final = "Задача выполнена, но агент не вернул текстовый ответ."
     _store(conv_id, "orchestrator", final)
     logger.info(f"[Orchestrator] Готово. Шагов: {steps_completed}, переплан: {replans}.")
 
@@ -97,6 +106,31 @@ def run(task: UserTask, context: dict = None) -> OrchestratorResult:
         messages_used=iterations,
     )
 
+def _normalize_output(output) -> str:
+    """Приводит output любого типа к читаемой строке."""
+    if not output:
+        return ""
+    if isinstance(output, str):
+        return output.strip()
+    if isinstance(output, list):
+        # Список строк → через перенос
+        parts = []
+        for item in output:
+            if isinstance(item, dict):
+                # {"method": "append()", "description": "..."} → "append() — ..."
+                if "method" in item and "description" in item:
+                    parts.append(f"- {item['method']} — {item['description']}")
+                elif "example" in item and "description" in item:
+                    parts.append(f"- {item['example']}: {item['description']}")
+                else:
+                    parts.append(str(item))
+            else:
+                parts.append(str(item))
+        return "\n".join(parts)
+    if isinstance(output, dict):
+        # Вложенный dict — рекурсивно собираем значения
+        return "\n".join(str(v) for v in output.values() if v)
+    return str(output)
 
 def _store(conv_id: str, role: str, content: str):
     """Безопасно сохраняет сообщение в ConversationStore."""
