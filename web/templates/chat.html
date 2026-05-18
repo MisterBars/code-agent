@@ -25,10 +25,23 @@
       <div id="conversation-list" class="conversation-list"></div>
     </aside>
 
+    <!-- Оверлей для закрытия сайдбара на мобильном -->
+    <div id="sidebar-overlay" class="sidebar-overlay"></div>
+
     <main class="main">
       <header class="topbar">
-        <div class="topbar-title">Локальный AI-агент</div>
-        <div class="topbar-subtitle" id="conversation-label">Выбери или создай беседу</div>
+        <!-- Кнопка-бургер — видна только на мобильном -->
+        <button id="sidebar-toggle" class="sidebar-toggle" aria-label="Открыть список бесед">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <line x1="2" y1="4" x2="16" y2="4"/>
+            <line x1="2" y1="9" x2="16" y2="9"/>
+            <line x1="2" y1="14" x2="16" y2="14"/>
+          </svg>
+        </button>
+        <div class="topbar-info">
+          <div class="topbar-title">Локальный AI-агент</div>
+          <div class="topbar-subtitle" id="conversation-label">Выбери или создай беседу</div>
+        </div>
       </header>
 
       <section id="messages" class="messages"></section>

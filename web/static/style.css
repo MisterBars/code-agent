@@ -117,6 +117,15 @@ body { min-height: 100vh; }
 .icon-btn:hover { color: #c8d0da; background: #252932; }
 .icon-btn.danger:hover { color: #e05c5c; background: #2a1a1a; }
 
+/* ── Sidebar overlay (мобильный) ─────────────────────── */
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 99;
+}
+
 /* ── Main ────────────────────────────────────────────── */
 .main {
   display: flex;
@@ -126,15 +135,53 @@ body { min-height: 100vh; }
   min-width: 0;
 }
 
+/* ── Topbar ──────────────────────────────────────────── */
 .topbar {
   border-bottom: 1px solid #252932;
   padding: 14px 20px;
   background: #12151b;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.topbar-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
 .topbar-title { font-size: 16px; font-weight: 600; }
-.topbar-subtitle { font-size: 12px; color: #6e7a8a; margin-top: 3px; }
+.topbar-subtitle {
+  font-size: 12px;
+  color: #6e7a8a;
+  margin-top: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Кнопка-бургер — скрыта на десктопе */
+.sidebar-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 1px solid #252932;
+  border-radius: 8px;
+  color: #8e99a8;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.sidebar-toggle:hover {
+  background: #1c212a;
+  color: #e8ecf1;
+}
 
 /* ── Messages ────────────────────────────────────────── */
 .messages {
@@ -172,36 +219,49 @@ body { min-height: 100vh; }
 }
 
 /* ── Markdown inside bubble ──────────────────────────── */
-.message-bubble p { margin: 0 0 10px; }
+.message-bubble p  { margin: 0 0 10px; }
 .message-bubble p:last-child { margin-bottom: 0; }
-.message-bubble ul, .message-bubble ol { padding-left: 20px; margin: 8px 0; }
-.message-bubble li { margin: 4px 0; }
-.message-bubble h1, .message-bubble h2, .message-bubble h3 {
-  margin: 14px 0 6px;
-  font-size: 15px;
-  color: #c8d5e8;
+.message-bubble ul,
+.message-bubble ol { padding-left: 20px; margin: 0 0 10px; }
+.message-bubble li { margin-bottom: 4px; }
+.message-bubble h1,
+.message-bubble h2,
+.message-bubble h3 { margin: 14px 0 6px; font-size: 15px; }
+.message-bubble blockquote {
+  margin: 8px 0;
+  padding: 6px 12px;
+  border-left: 3px solid #2a303b;
+  color: #8e99a8;
 }
-.message-bubble strong { color: #d6e4f8; }
-.message-bubble hr { border: none; border-top: 1px solid #252932; margin: 12px 0; }
-
-/* inline code */
-.message-bubble code:not(.hljs) {
-  background: #1e232c;
+.message-bubble code {
+  background: #1a1e27;
   border: 1px solid #2a303b;
-  border-radius: 5px;
+  border-radius: 4px;
   padding: 1px 5px;
   font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
-  font-size: 13px;
-  color: #b5d4ff;
+  font-size: 12px;
 }
+.message-bubble table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 8px 0;
+  font-size: 13px;
+}
+.message-bubble th,
+.message-bubble td {
+  border: 1px solid #252932;
+  padding: 6px 10px;
+  text-align: left;
+}
+.message-bubble th { background: #1a1e27; color: #c8d0da; }
 
-/* ── Code block wrapper ──────────────────────────────── */
+/* ── Code block ──────────────────────────────────────── */
 .code-block {
-  position: relative;
-  margin: 10px 0;
+  border: 1px solid #2a303b;
   border-radius: 10px;
   overflow: hidden;
-  border: 1px solid #2a303b;
+  margin: 10px 0;
+  font-size: 13px;
 }
 
 .code-block-header {
@@ -396,6 +456,7 @@ body { min-height: 100vh; }
 .primary-btn:hover { background: #4d85c0; }
 .primary-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
+/* ── Empty state ─────────────────────────────────────── */
 .empty-state {
   color: #4e5a6a;
   font-size: 14px;
@@ -403,8 +464,45 @@ body { min-height: 100vh; }
   margin-top: 80px;
 }
 
+/* ── Mobile ──────────────────────────────────────────── */
 @media (max-width: 768px) {
-  .app { grid-template-columns: 1fr; }
-  .sidebar { display: none; }
+  .app {
+    grid-template-columns: 1fr;
+  }
+
+  /* Сайдбар — выезжает поверх контента */
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 280px;
+    height: 100vh;
+    z-index: 100;
+    transform: translateX(-100%);
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .sidebar.open {
+    transform: translateX(0);
+  }
+
+  /* Оверлей активируется когда сайдбар открыт */
+  .sidebar.open ~ #sidebar-overlay,
+  .sidebar-overlay.active {
+    display: block;
+  }
+
+  /* Бургер — показываем на мобильном */
+  .sidebar-toggle {
+    display: flex;
+  }
+
   .message { max-width: 100%; }
+  .message.user { max-width: 100%; }
+
+  .messages { padding: 16px 12px; }
+
+  .composer { padding: 10px 12px 8px; }
+
+  .topbar { padding: 10px 12px; }
 }

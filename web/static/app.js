@@ -1,7 +1,7 @@
 const DEFAULT_MODEL = "qwen2.5-coder:7b";
 
 let currentConversationId  = null;
-let currentAbortController = null;   // для стоп-кнопки
+let currentAbortController = null;
 let _sending = false;
 
 const conversationListEl = document.getElementById("conversation-list");
@@ -22,13 +22,30 @@ messageInput.addEventListener("input", () => {
   messageInput.style.overflowY = h >= 200 ? "auto" : "hidden";
 });
 
-function setSending(state) {
-  _sending = state;
-  sendBtn.disabled = state;
-  // показываем/скрываем стоп-кнопку
-  document.getElementById("stop-btn")?.classList.toggle("hidden", !state);
+// ── Единое управление режимом отправки ───────────────────────
+// mode: "idle" | "sending" | "streaming"
+function setSendMode(mode) {
+  _sending = mode !== "idle";
+  if (mode === "idle") {
+    sendBtn.textContent   = "↑";
+    sendBtn.title         = "";
+    sendBtn.style.background = "";
+    sendBtn.disabled      = false;
+    sendBtn.onclick       = null;
+    messageInput.disabled = false;
+    messageInput.style.borderColor = "";
+  } else if (mode === "sending") {
+    sendBtn.textContent   = "…";
+    sendBtn.disabled      = true;
+    messageInput.disabled = true;
+  } else if (mode === "streaming") {
+    sendBtn.textContent      = "■";
+    sendBtn.title            = "Остановить";
+    sendBtn.style.background = "#5a2020";
+    sendBtn.disabled         = false;
+    sendBtn.onclick = (e) => { e.stopPropagation(); stopGeneration(); };
+  }
 }
-
 
 // ── API ───────────────────────────────────────────────────────
 async function api(url, options = {}) {
@@ -46,6 +63,26 @@ function esc(text) {
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
+}
+
+// ── Показать ошибку в чате ────────────────────────────────────
+function showError(msg) {
+  const div = document.createElement("div");
+  div.className = "empty-state";
+  div.style.color = "#e05c5c";
+  div.textContent = "Ошибка: " + msg;
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+// ── Удалить DOM-элементы сообщений начиная с createdAt ────────
+function removeMessagesAfter(createdAt) {
+  const all = Array.from(messagesEl.children);
+  let found = false;
+  for (const el of all) {
+    if (el.dataset.createdAt === createdAt) { found = true; }
+    if (found) el.remove();
+  }
 }
 
 // ── Кастомный диалог ──────────────────────────────────────────
@@ -105,7 +142,8 @@ function showDialog({ title, input = false, defaultValue = "", confirmText = "OK
 // ── Markdown → HTML ───────────────────────────────────────────
 function renderMarkdown(text) {
   if (!text) return "";
-  text = text.replace(/\{'([^']+)':\s*'([^']*)',\s*'code':\s*'((?:[^'\\]|\\.)*)(?:',\s*'result':\s*'((?:[^'\\]|\\.)*)')?\s*\}/g,
+  text = text.replace(
+    /\{'([^']+)':\s*'([^']*)',\s*'code':\s*'((?:[^'\\]|\\.)*)(?:',\s*'result':\s*'((?:[^'\\]|\\.)*)')?\s*\}/g,
     (match, key, val, code, result) => {
       const decodedCode = code.replace(/\\n/g, "\n").replace(/\\t/g, "\t").replace(/\\'/g, "'").replace(/\\\\/g, "\\");
       const lang = (val || "").toLowerCase().includes("java") && !(val || "").toLowerCase().includes("javascript") ? "java"
@@ -118,7 +156,8 @@ function renderMarkdown(text) {
       return out;
     }
   );
-  text = text.replace(/\{'example':\s*'((?:[^'\\]|\\.)*)',\s*'code':\s*'((?:[^'\\]|\\.)*)'\}/g,
+  text = text.replace(
+    /\{'example':\s*'((?:[^'\\]|\\.)*)',\s*'code':\s*'((?:[^'\\]|\\.)*)'\}/g,
     (match, example, code) => {
       const decodedExample = example.replace(/\\'/g, "'").replace(/\\\\/g, "\\");
       const decodedCode = code.replace(/\\n/g, "\n").replace(/\\t/g, "\t").replace(/\\'/g, "'").replace(/\\\\/g, "\\");
@@ -222,7 +261,6 @@ function renderMessages(items) {
   while (i < items.length) {
     const msg = items[i];
     if (msg.role === "user") {
-      // Передаём created_at для кнопок повтора/редактирования
       messagesEl.appendChild(makeUserBubble(msg.content, msg.created_at));
       i++;
       continue;
@@ -260,69 +298,12 @@ function makeSmallBtn(label, onClick) {
   return btn;
 }
 
-// ── Удалить ветку и отправить заново ─────────────────────────
-async function deleteAndResend(text, createdAt) {
-  if (!currentConversationId) return;
-
-  // 1. Удаляем сообщения после редактируемого
-  try {
-    await api(`/api/chat/edit/${currentConversationId}`, {
-      method: "POST",
-      body: JSON.stringify({ text, after_created_at: createdAt }),
-    });
-  } catch (err) {
-    alert("Ошибка: " + err.message);
-    return;
-  }
-
-  // 2. Перезагружаем — покажет усечённую историю без удалённых сообщений
-  await loadMessages(currentConversationId);
-
-  // 3. Показываем новый вопрос и reasoning (как в sendMessage)
-  messagesEl.appendChild(makeUserBubble(text));
-  messagesEl.scrollTop = messagesEl.scrollHeight;
-
-  const { agentWrap, rBlock, rBody, rLabel, appendReasoning } = makeReasoningBlock();
-  messagesEl.appendChild(agentWrap);
-  messagesEl.scrollTop = messagesEl.scrollHeight;
-
-  setSendMode("streaming");
-
-  try {
-    currentAbortController = new AbortController();
-
-    const response = await fetch("/api/chat/stream", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ conversation_id: currentConversationId, text }),
-      signal: currentAbortController.signal,
-    });
-
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-    await consumeStream(response, { rBlock, rBody, rLabel, appendReasoning });
-
-  } catch (err) {
-    if (err.name === "AbortError") {
-      appendReasoning("[остановлено]");
-      rLabel.textContent = "Остановлено";
-      rBlock.classList.remove("open");
-      await loadMessages(currentConversationId);
-    } else {
-      appendReasoning("[error] " + err.message);
-      rLabel.textContent = "Ошибка";
-    }
-  } finally {
-    currentAbortController = null;
-    setSendMode("idle");
-    messageInput.focus();
-  }
-}
-
 // ── Пузырь вопроса пользователя ──────────────────────────────
 function makeUserBubble(content, createdAt) {
   const wrap = document.createElement("div");
   wrap.className = "message user";
+  // data-created-at нужен для removeMessagesAfter
+  if (createdAt) wrap.dataset.createdAt = createdAt;
 
   const bubble = document.createElement("div");
   bubble.className = "message-bubble";
@@ -332,7 +313,6 @@ function makeUserBubble(content, createdAt) {
   const footer = document.createElement("div");
   footer.style.cssText = "display:flex;justify-content:flex-end;gap:6px;margin-top:5px;padding:0 4px;";
 
-  // Копировать
   const copyBtn = makeSmallBtn("Копировать", () => {
     navigator.clipboard.writeText(content).then(() => {
       copyBtn.textContent = "✓";
@@ -340,13 +320,11 @@ function makeUserBubble(content, createdAt) {
       setTimeout(() => { copyBtn.textContent = "Копировать"; copyBtn.style.color = "#3a4555"; }, 2000);
     });
   });
-
   footer.appendChild(copyBtn);
 
-  // Повторить и Изменить — только если есть timestamp (сохранённые сообщения)
   if (createdAt) {
-    // Повторить — удалить ветку и отправить тот же текст
     const retryBtn = makeSmallBtn("↺ Повторить", async () => {
+      if (_sending) return;
       retryBtn.disabled = true;
       retryBtn.textContent = "...";
       await deleteAndResend(content, createdAt);
@@ -354,15 +332,13 @@ function makeUserBubble(content, createdAt) {
       retryBtn.textContent = "↺ Повторить";
     });
 
-    // Изменить — вставить текст в поле, пометить как редактирование
     const editBtn = makeSmallBtn("✏ Изменить", () => {
       messageInput.value = content;
       messageInput.style.height = "52px";
       const h = Math.min(messageInput.scrollHeight, 200);
       messageInput.style.height = h + "px";
-      messageInput.dataset.editCreatedAt = createdAt;  // флаг редактирования
+      messageInput.dataset.editCreatedAt = createdAt;
       messageInput.focus();
-      // Визуальный намёк что это редактирование
       messageInput.style.borderColor = "#4d85c0";
       editBtn.textContent = "✏ (ред.)";
       editBtn.style.color = "#4d85c0";
@@ -508,8 +484,7 @@ function makeAgentGroup(reasoningMsgs, orcMsg) {
     footer.style.cssText = "display:flex;justify-content:space-between;align-items:center;margin-top:6px;padding:0 4px;";
 
     if (orcMsg.id) {
-      const ratingWrap = makeRatingButtons(orcMsg.id, orcMsg.rating ?? null);
-      footer.appendChild(ratingWrap);
+      footer.appendChild(makeRatingButtons(orcMsg.id, orcMsg.rating ?? null));
     } else {
       footer.appendChild(document.createElement("div"));
     }
@@ -618,30 +593,7 @@ async function stopGeneration() {
   }
 }
 
-function setSendMode(mode) {
-  // mode: "idle" | "sending" | "streaming"
-  if (mode === "idle") {
-    sendBtn.textContent = "↑";
-    sendBtn.title = "";
-    sendBtn.style.background = "";
-    sendBtn.disabled = false;
-    messageInput.disabled = false;
-    messageInput.style.borderColor = "";
-    sendBtn.onclick = null;
-  } else if (mode === "sending") {
-    sendBtn.textContent = "…";
-    sendBtn.disabled = true;
-    messageInput.disabled = true;
-  } else if (mode === "streaming") {
-    sendBtn.textContent = "■";
-    sendBtn.title = "Остановить";
-    sendBtn.style.background = "#5a2020";
-    sendBtn.disabled = false;
-    sendBtn.onclick = (e) => { e.stopPropagation(); stopGeneration(); };
-  }
-}
-
-// Создаёт и возвращает reasoning-блок для вставки в DOM
+// ── Reasoning-блок ────────────────────────────────────────────
 function makeReasoningBlock() {
   const agentWrap = document.createElement("div");
   agentWrap.className = "message orchestrator";
@@ -672,7 +624,7 @@ function makeReasoningBlock() {
   return { agentWrap, rBlock, rBody, rLabel, appendReasoning };
 }
 
-// Читает SSE-стрим и обновляет reasoning-блок
+// ── SSE: читает поток и обновляет reasoning-блок ──────────────
 async function consumeStream(response, { rBlock, rLabel, appendReasoning }) {
   const reader  = response.body.getReader();
   const decoder = new TextDecoder();
@@ -700,21 +652,26 @@ async function consumeStream(response, { rBlock, rLabel, appendReasoning }) {
           appendReasoning("[planner] " + (event.message || ""));
           break;
         case "planner_done":
-          stepsTotal = event.steps_total || 0;
-          appendReasoning("[planner] " + (event.message || ""));
-          if (stepsTotal > 0) rLabel.textContent = `Выполняю 0 / ${stepsTotal} шагов...`;
+          appendReasoning("[planner] ✓ " + (event.message || ""));
           break;
         case "worker_start":
-          rLabel.textContent = `Шаг ${event.step} / ${event.steps_total || stepsTotal}...`;
-          appendReasoning(`[worker] → ${event.message || ""}`);
+          stepsDone++;
+          stepsTotal = event.total || stepsTotal;
+          rLabel.textContent = `Шаг ${stepsDone}${stepsTotal ? "/" + stepsTotal : ""}...`;
+          appendReasoning(`[worker #${stepsDone}] ${event.message || ""}`);
           break;
         case "worker_done":
-          stepsDone++;
-          rLabel.textContent = `Шаг ${event.step} / ${stepsTotal} готов`;
-          appendReasoning(`[worker] ✓ ${event.message || ""}`);
+          appendReasoning(`[worker #${stepsDone}] ✓ ${event.message || ""}`);
           break;
         case "replan":
-          appendReasoning(`[replan] ↺ ${event.message || ""}`);
+          rLabel.textContent = "Перепланирование...";
+          appendReasoning(`[replan] ${event.message || ""}`);
+          break;
+        case "fix_start":
+          appendReasoning(`[fix] ${event.message || ""}`);
+          break;
+        case "fix_done":
+          appendReasoning(`[fix] ✓ ${event.message || ""}`);
           break;
         case "dedup_start":
           rLabel.textContent = "Финальная проверка...";
@@ -741,12 +698,92 @@ async function consumeStream(response, { rBlock, rLabel, appendReasoning }) {
   }
 }
 
+// ── Единая функция SSE-стрима ─────────────────────────────────
+async function runStream({ text, conversationId, rBlock, rLabel, appendReasoning, onAbort }) {
+  if (currentAbortController) currentAbortController.abort();
+  currentAbortController = new AbortController();
+
+  setSendMode("streaming");
+
+  try {
+    const res = await fetch("/api/chat/stream", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        conversation_id: conversationId,
+        text,
+        model: DEFAULT_MODEL,
+      }),
+      signal: currentAbortController.signal,
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `HTTP ${res.status}`);
+    }
+
+    await consumeStream(res, { rBlock, rLabel, appendReasoning });
+
+  } catch (e) {
+    if (e.name === "AbortError") {
+      if (onAbort) onAbort();
+      else {
+        appendReasoning("[остановлено пользователем]");
+        rLabel.textContent = "Остановлено";
+        rBlock.classList.remove("open");
+        await loadMessages(conversationId);
+      }
+    } else {
+      appendReasoning("[error] " + e.message);
+      rLabel.textContent = "Ошибка";
+      showError(e.message);
+    }
+  } finally {
+    currentAbortController = null;
+    setSendMode("idle");
+    messageInput.focus();
+  }
+}
+
+// ── Удалить ветку и отправить заново ─────────────────────────
+async function deleteAndResend(text, createdAt) {
+  if (!currentConversationId) return;
+
+  // Только удаляем ветку, агента НЕ запускаем здесь
+  try {
+    await api(`/api/chat/delete-branch/${currentConversationId}`, {
+      method: "POST",
+      body: JSON.stringify({ after_created_at: createdAt }),
+    });
+  } catch (err) {
+    alert("Ошибка: " + err.message);
+    return;
+  }
+
+  // Удаляем DOM-элементы начиная с редактируемого сообщения
+  removeMessagesAfter(createdAt);
+
+  // Показываем новый вопрос
+  messagesEl.appendChild(makeUserBubble(text));
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+
+  const { agentWrap, rBlock, rLabel, appendReasoning } = makeReasoningBlock();
+  messagesEl.appendChild(agentWrap);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+
+  await runStream({
+    text,
+    conversationId: currentConversationId,
+    rBlock, rLabel, appendReasoning,
+  });
+}
+
 // ── Send ──────────────────────────────────────────────────────
 async function sendMessage() {
   const text = messageInput.value.trim();
-  if (!text) return;
+  if (!text || _sending) return;
 
-  // Режим редактирования — удалить ветку и переотправить
+  // Режим редактирования
   const editCreatedAt = messageInput.dataset.editCreatedAt;
   if (editCreatedAt) {
     delete messageInput.dataset.editCreatedAt;
@@ -766,144 +803,38 @@ async function sendMessage() {
 
   setSendMode("sending");
 
-  // Показываем вопрос сразу (без createdAt — кнопки появятся после loadMessages)
   messagesEl.appendChild(makeUserBubble(text));
   messagesEl.scrollTop = messagesEl.scrollHeight;
 
-  // Reasoning-блок через общую функцию
-  const { agentWrap, rBlock, rBody, rLabel, appendReasoning } = makeReasoningBlock();
+  const { agentWrap, rBlock, rLabel, appendReasoning } = makeReasoningBlock();
   messagesEl.appendChild(agentWrap);
   messagesEl.scrollTop = messagesEl.scrollHeight;
 
-  try {
-    currentAbortController = new AbortController();
-    setSendMode("streaming");
-
-    const response = await fetch("/api/chat/stream", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ conversation_id: currentConversationId, text }),
-      signal: currentAbortController.signal,
-    });
-
-    if (!response.ok) {
-      const err = await response.json();
-      throw new Error(err.error || `HTTP ${response.status}`);
-    }
-
-    await consumeStream(response, { rBlock, rBody, rLabel, appendReasoning });
-
-  } catch (err) {
-    if (err.name === "AbortError") {
+  await runStream({
+    text,
+    conversationId: currentConversationId,
+    rBlock, rLabel, appendReasoning,
+    onAbort: async () => {
       appendReasoning("[остановлено пользователем]");
       rLabel.textContent = "Остановлено";
       rBlock.classList.remove("open");
       await loadMessages(currentConversationId);
-    } else {
-      appendReasoning("[error] " + err.message);
-      rLabel.textContent = "Ошибка";
-      setTimeout(() => { if (!rBody.textContent.trim()) agentWrap.remove(); }, 3000);
-    }
-  } finally {
-    currentAbortController = null;
-    setSendMode("idle");
-    messageInput.focus();
-  }
-}
-
-async function submitEdit(messageId, createdAt, newText) {
-  // 1. Удаляем ветку
-  await api(`/api/chat/delete-branch/${currentConversationId}`, {
-    method: "POST",
-    body: JSON.stringify({ after_created_at: createdAt }),
+    },
   });
-  // 2. Удаляем блоки из DOM после этого сообщения
-  removeMessagesAfter(createdAt);
-  // 3. Запускаем SSE-стрим как обычный новый запрос
-  await runStream({
-    text: newText,
-    conversationId: currentConversationId,
-    onDone: () => loadMessages(currentConversationId),
-  });
-}
-
-async function retryMessage(userText) {
-  // Удаляем блоки после этого сообщения — уже делается на бэке через /api/chat/edit
-  // Здесь только запускаем стрим
-  if (_sending) return;
-  await runStream({
-    text: userText,
-    conversationId: currentConversationId,
-    onDone: () => loadMessages(currentConversationId),
-  });
-}
-
-// ── Единая функция SSE-стрима (используется везде) ────────────────────────
-async function runStream({ text, conversationId, model, onDone }) {
-  // Отменяем предыдущий запрос если был
-  if (currentAbortController) currentAbortController.abort();
-  currentAbortController = new AbortController();
-
-  setSending(true);
-
-  try {
-    const res = await fetch("/api/chat/stream", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        conversation_id: conversationId,
-        text,
-        model: model || DEFAULT_MODEL,
-      }),
-      signal: currentAbortController.signal,
-    });
-
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || `HTTP ${res.status}`);
-    }
-
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buf = "";
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      const parts = buf.split("\n\n");
-      buf = parts.pop();
-      for (const part of parts) {
-        if (!part.startsWith("data: ")) continue;
-        try {
-          const event = JSON.parse(part.slice(6));
-          handleStreamEvent(event);
-          if (event.type === "done") {
-            if (onDone) onDone(event);
-            return;
-          }
-        } catch {}
-      }
-    }
-  } catch (e) {
-    if (e.name !== "AbortError") showError(e.message);
-  } finally {
-    setSending(false);
-    currentAbortController = null;
-  }
 }
 
 // ── Events ────────────────────────────────────────────────────
 newChatBtn.addEventListener("click", createConversation);
+
 sendBtn.addEventListener("click", () => {
-  if (_sending) return;   // ← guard
+  if (_sending) return;
   const text = messageInput.value.trim();
   if (!text) return;
-  sendMessage(text);
+  sendMessage();
 });
+
 messageInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) sendMessage();
-  // Escape — отменить режим редактирования
   if (e.key === "Escape" && messageInput.dataset.editCreatedAt) {
     delete messageInput.dataset.editCreatedAt;
     messageInput.value = "";
@@ -911,6 +842,19 @@ messageInput.addEventListener("keydown", (e) => {
     messageInput.style.borderColor = "";
   }
 });
+
+// Мобильный сайдбар
+const sidebarToggle = document.getElementById("sidebar-toggle");
+const sidebar       = document.querySelector(".sidebar");
+if (sidebarToggle && sidebar) {
+  sidebarToggle.addEventListener("click", () => {
+    sidebar.classList.toggle("open");
+  });
+  // Закрыть при клике на беседу
+  conversationListEl.addEventListener("click", () => {
+    sidebar.classList.remove("open");
+  });
+}
 
 // ── Init ──────────────────────────────────────────────────────
 (async function init() {
