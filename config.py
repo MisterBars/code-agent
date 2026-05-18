@@ -24,7 +24,7 @@ DEFAULT_MODEL: str = os.getenv("DEFAULT_MODEL", "qwen2.5-coder:7b")
 OLLAMA_TIMEOUT: int = 120
 
 # ── Orchestrator ──────────────────────────────────────────────
-MAX_REPLANS:    int = 3
+MAX_REPLAN_DEPTH = 3
 MAX_STEPS:      int = 10
 MAX_ITERATIONS: int = 20
 

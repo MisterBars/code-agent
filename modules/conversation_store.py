@@ -35,10 +35,11 @@ def init_db() -> None:
                     conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
                     role            TEXT NOT NULL,
                     content         TEXT NOT NULL,
-                    rating          SMALLINT DEFAULT NULL,
-                    rating_note     TEXT     DEFAULT NULL,
-                    tokens_used     INT      DEFAULT NULL,
-                    meta            JSONB    DEFAULT '{}',
+                    model           TEXT        DEFAULT NULL,
+                    rating          SMALLINT    DEFAULT NULL,
+                    rating_note     TEXT        DEFAULT NULL,
+                    tokens_used     INT         DEFAULT NULL,
+                    meta            JSONB       DEFAULT '{}',
                     created_at      TIMESTAMPTZ DEFAULT NOW()
                 );
 
@@ -47,6 +48,16 @@ def init_db() -> None:
                 CREATE INDEX IF NOT EXISTS idx_messages_rating
                     ON messages(conversation_id, rating)
                     WHERE rating IS NOT NULL;
+                CREATE INDEX IF NOT EXISTS idx_messages_model
+                    ON messages(model)
+                    WHERE model IS NOT NULL;
+
+                -- Безопасные миграции для существующих таблиц
+                ALTER TABLE messages ADD COLUMN IF NOT EXISTS model       TEXT     DEFAULT NULL;
+                ALTER TABLE messages ADD COLUMN IF NOT EXISTS rating      SMALLINT DEFAULT NULL;
+                ALTER TABLE messages ADD COLUMN IF NOT EXISTS rating_note TEXT     DEFAULT NULL;
+                ALTER TABLE messages ADD COLUMN IF NOT EXISTS tokens_used INT      DEFAULT NULL;
+                ALTER TABLE messages ADD COLUMN IF NOT EXISTS meta        JSONB    DEFAULT '{}';
             """)
         conn.commit()
 
@@ -70,33 +81,32 @@ def append_message(
     content: str,
     meta: dict = None,
     tokens_used: int = None,
+    model: str = None,       # ← добавили
 ) -> str:
     """
     Добавляет сообщение. role: user / planner / worker / orchestrator
-    Возвращает id сообщения (нужен для последующей оценки).
+    Возвращает id сообщения.
     """
     msg_id = str(uuid.uuid4())
     with _connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO messages (id, conversation_id, role, content, meta, tokens_used)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                INSERT INTO messages
+                    (id, conversation_id, role, content, meta, tokens_used, model)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """,
                 (msg_id, conversation_id, role, content,
-                 json.dumps(meta or {}), tokens_used)
+                 json.dumps(meta or {}), tokens_used, model)
             )
         conn.commit()
     return msg_id
 
 
-def rate_message(message_id: str, rating: int, note: str = None) -> None:
-    """
-    Оценивает ответ агента.
-    rating: +1 (полезно) / -1 (бесполезно)
-    """
-    if rating not in (1, -1):
-        raise ValueError("rating должен быть +1 или -1")
+def rate_message(message_id: str, rating: int | None, note: str = None) -> None:
+    """rating=None снимает оценку, +1/-1 ставит."""
+    if rating is not None and rating not in (1, -1):
+        raise ValueError("rating: +1, -1 или None")
     with _connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -107,19 +117,25 @@ def rate_message(message_id: str, rating: int, note: str = None) -> None:
 
 
 def get_messages(conversation_id: str) -> list[dict]:
-    """Все сообщения беседы в хронологическом порядке."""
     with _connect() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
                 """
-                SELECT id, role, content, rating, created_at, meta
+                SELECT id, role, content, rating, rating_note, model, created_at
                 FROM messages
                 WHERE conversation_id = %s
                 ORDER BY created_at ASC
                 """,
                 (conversation_id,)
             )
-            return [dict(r) for r in cur.fetchall()]
+            rows = cur.fetchall()
+    result = []
+    for r in rows:
+        d = dict(r)
+        if hasattr(d.get("created_at"), "isoformat"):
+            d["created_at"] = d["created_at"].isoformat()
+        result.append(d)
+    return result
 
 
 def get_context_window(conversation_id: str, max_pairs: int = 6) -> list[dict]:
@@ -206,4 +222,21 @@ def delete_conversation(conversation_id: str) -> None:
     with _connect() as conn:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM conversations WHERE id = %s", (conversation_id,))
+        conn.commit()
+
+def delete_messages_after(conversation_id: str, after_created_at: str) -> None:
+    """
+    Удаляет все сообщения беседы после указанного времени.
+    Используется при редактировании вопроса — старая ветка удаляется.
+    """
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                DELETE FROM messages
+                WHERE conversation_id = %s
+                  AND created_at >= %s
+                """,
+                (conversation_id, after_created_at)
+            )
         conn.commit()

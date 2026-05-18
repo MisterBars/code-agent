@@ -59,13 +59,12 @@ class WorkerResult:
 
 @dataclass
 class OrchestratorResult:
-    success: bool
-    final_answer: str
-    steps_completed: int = 0
-    replans: int = 0
-    messages_used: int = 0
-    artifacts: list = field(default_factory=list)
-    error: Optional[str] = None
+    success:         bool
+    final_answer:    str
+    steps_completed: int
+    replans:         int
+    messages_used:   int
+    message_id:      str | None = None  # ← id финального сообщения для оценки
 
 
 # ─── RAG ──────────────────────────────────────────────────────
