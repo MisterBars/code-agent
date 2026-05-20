@@ -21,7 +21,7 @@ DB_DSN: str = os.environ["DATABASE_URL"]
 # ── Ollama ────────────────────────────────────────────────────
 OLLAMA_URL:    str = os.getenv("OLLAMA_URL",    "http://localhost:11434")
 DEFAULT_MODEL: str = os.getenv("DEFAULT_MODEL", "qwen2.5-coder:7b")
-OLLAMA_TIMEOUT: int = 120
+OLLAMA_TIMEOUT: int = 600
 
 # ── Orchestrator ──────────────────────────────────────────────
 MAX_REPLAN_DEPTH = 3
@@ -30,3 +30,6 @@ MAX_ITERATIONS: int = 20
 
 # ── Logger ────────────────────────────────────────────────────
 LOG_FILE: str = "agent.log"
+
+# ── GPU ───────────────────────────────────────────────────────
+VRAM_GB: int = int(os.getenv("VRAM_GB", "8"))   # объём VRAM в ГБ

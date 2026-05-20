@@ -19,6 +19,7 @@ from modules.conversation_store import append_message
 from classes.types import UserTask, PlanStep, OrchestratorResult
 from classes import planner_agent, worker_agent
 from modules import ollama_client as _ollama
+import json, re
 
 
 def run(task: UserTask, context: dict = None) -> OrchestratorResult:
@@ -54,7 +55,15 @@ def run(task: UserTask, context: dict = None) -> OrchestratorResult:
 
     # ── Шаг 1: Первичное планирование ────────────────────────
     emit("planner_start", message="Планирую задачу...")
-    plan = planner_agent.plan(task, context, model=model)
+    try:
+        plan = planner_agent.plan(task, context, model=model)
+    except RuntimeError as e:
+        err_msg = str(e)
+        emit("answer", content=f"❌ Ошибка: {err_msg}", success=False, message_id=None)
+        return OrchestratorResult(
+            success=False, final_answer=err_msg, message_id=None,
+            steps_completed=0, replans=0, messages_used=0,
+        )
 
     plan_text = f"[ПЛАН] {plan.goal}\n" + "\n".join(
         f"  {i+1}. {s.title}" for i, s in enumerate(plan.steps)
@@ -111,6 +120,28 @@ def run(task: UserTask, context: dict = None) -> OrchestratorResult:
         raw_final = "Задача выполнена, но агент не вернул текстовый ответ."
     else:
         raw_final = _build_final(non_empty, root_steps)
+        # Synthesis pass — финальная «причёска» ответа через LLM
+        # Включается если шагов > 2 (для одиночных шагов не нужно)
+        if len(non_empty) > 2:
+            try:
+                synthesis_prompt = (
+                    f"Исходный вопрос: {task.text}\n\n"
+                    f"Собранный ответ от агентов:\n{raw_final}\n\n"
+                    "Перепиши это как единый связный ответ для пользователя. "
+                    "Требования:\n"
+                    "- Не повторяй структуру плана (без заголовков вида 'Объяснить:', 'Показать код:').\n"
+                    "- Используй ## только для реальных смысловых разделов (не названий шагов).\n"
+                    "- Сохрани все таблицы, примеры кода и числовые данные дословно.\n"
+                    "- Пометь незавершённые части текстом: ⚠️ *Требует уточнения*\n"
+                    "- Убери JSON-объекты, статусы, технические метки.\n"
+                    "Ответ должен звучать как написанный человеком-экспертом."
+                )
+                synthesized = _ollama.ask(synthesis_prompt, model=model)
+                if synthesized and len(synthesized) > 100:
+                    raw_final = synthesized
+            except Exception as e:
+                logger.warn(f"[Orchestrator] Synthesis pass не удался: {e}")
+                # Оставляем raw_final как есть
 
     final = _deduplicate_answer(raw_final)
 
@@ -276,10 +307,22 @@ def _execute_steps(
 
 def _build_final(outputs: list, root_steps: list) -> str:
     """
-    Собирает финальный ответ: каждый output корневого уровня
-    получает заголовок ## из названия шага.
-    Подшаги (глубина 1+) вкладываются под родительский заголовок без отдельного ## .
+    Собирает финальный ответ.
+    Корневые шаги получают ## заголовок — но очищенный от служебных префиксов.
+    Подшаги склеиваются без дополнительного заголовка.
     """
+    _PREFIXES = (
+        "Объяснить: ", "Перечислить: ", "Показать код: ", "Сравнить: ",
+        "Привести пример: ", "Подвести итог: ", "Определить: ", "Составить: ",
+        "Показать: ", "Описать: ", "Рассмотреть: ", "Изучить: ",
+    )
+
+    def clean_title(title: str) -> str:
+        for p in _PREFIXES:
+            if title.startswith(p):
+                return title[len(p):]
+        return title
+
     parts = []
     root_count = len(root_steps)
 
@@ -287,22 +330,20 @@ def _build_final(outputs: list, root_steps: list) -> str:
         if not output.strip():
             continue
         if i < root_count:
-            # Корневой шаг — заголовок второго уровня
-            title = root_steps[i].title
+            title = clean_title(root_steps[i].title)
             parts.append(f"## {title}\n\n{output}")
         else:
-            # Вложенный шаг — без нового заголовка, просто добавляем
-            # (он уже попал в нужное место через рекурсию)
             parts.append(output)
 
     return "\n\n---\n\n".join(parts)
 
 
 def _normalize_output(output) -> str:
+    """Конвертирует любой формат output worker-а в чистую строку."""
     if not output:
         return ""
-    if isinstance(output, str):
-        return output.strip()
+
+    # ── list/dict → строка ───────────────────────────────────
     if isinstance(output, list):
         parts = []
         for item in output:
@@ -316,9 +357,42 @@ def _normalize_output(output) -> str:
             else:
                 parts.append(str(item))
         return "\n".join(parts)
+
     if isinstance(output, dict):
         return "\n".join(str(v) for v in output.values() if v)
-    return str(output)
+
+    text = str(output).strip()
+
+    # ── 1. JSON-обёртка {"status":..., "output":...} ────────
+    if text.startswith("{"):
+        try:
+            start = text.find("{")
+            end = text.rfind("}") + 1
+            data = json.loads(text[start:end])
+            if isinstance(data, dict):
+                text = data.get("output") or data.get("reason") or text
+                text = str(text).strip()
+        except Exception:
+            pass
+
+    # ── 2. Экранированные \n которые пришли как строка ───────
+    # worker иногда возвращает "строка\\nстрока" вместо реальных переносов
+    if "\\n" in text and "\n" not in text:
+        text = text.replace("\\n", "\n").replace("\\t", "\t")
+
+    # ── 3. Неправильный язык у code-блоков ──────────────────
+    # Go/C++ код помечен как ```python — меняем на ```
+    text = re.sub(
+        r"```python\n(?=(//|package main|#include|import \"fmt\"|class [A-Z]))",
+        "```\n",
+        text,
+    )
+
+    # ── 4. JSON-мусор в начале текста ───────────────────────
+    text = re.sub(r'^\{\s*"status"\s*:.*?\}\s*\n+', '', text, flags=re.S)
+
+    return text.strip()
+
 
 
 def _deduplicate_answer(text: str) -> str:
@@ -358,3 +432,4 @@ def _deduplicate_answer(text: str) -> str:
             result.append(para)
 
     return "\n\n".join(result)
+
