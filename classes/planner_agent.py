@@ -1,22 +1,23 @@
 """
 PlannerAgent — агент-планировщик.
-Получает UserTask → анализирует → возвращает PlanResult со списком PlanStep.
-При needs_replan от worker — перепланирует на основе feedback.
 """
 import json
 import uuid
 
 from modules import ollama_client, logger
-from classes.types import UserTask, PlanResult, PlanStep, WorkerResult
+from classes.types import UserTask, PlanResult, PlanStep
 
 
-SYSTEM_PROMPT = """Ты — агент-планировщик. Твоя задача — разобрать задачу пользователя и разбить её на конкретные подзадачи.
+SYSTEM_PROMPT = """Ты — агент-планировщик. Твоя задача — разобрать задачу и разбить её на конкретные подзадачи.
 
 Правила:
 - Каждая подзадача должна быть атомарной и выполнимой отдельно
+- Подзадачи должны покрывать ТОЛЬКО текущую задачу — не выходи за её рамки
+- Название шага должно быть КОНКРЕТНЫМ — не "Примеры использования X", а "Пример кода: запуск корутины через asyncio.run"
+- Название шага должно однозначно говорить что нужно сделать: объяснить / показать код / сравнить / перечислить
 - Если задача простая и не требует разбивки — выполни её сам и поставь done: true
 - Возвращай ТОЛЬКО валидный JSON, без пояснений и markdown
-- Максимум 10 шагов
+- Максимум 5 шагов на один уровень — лучше меньше, но точнее
 
 Формат ответа:
 {
@@ -24,43 +25,80 @@ SYSTEM_PROMPT = """Ты — агент-планировщик. Твоя зада
   "done": false,
   "direct_answer": "",
   "steps": [
-    {"step_id": "s1", "title": "...", "description": "...", "priority": 1}
+    {"step_id": "s1", "title": "Объяснить: что такое event loop в asyncio", "description": "...", "priority": 1},
+    {"step_id": "s2", "title": "Показать код: базовая корутина с async/await", "description": "...", "priority": 2}
   ]
 }
 
 Если done=true — заполни direct_answer и оставь steps пустым.
 """
 
+SYSTEM_PROMPT_SUBPLAN = """Ты — агент-планировщик. Тебе нужно разбить ОДИН конкретный шаг на подшаги.
+
+ВАЖНО:
+- Планируй ТОЛЬКО то, что относится к данному шагу — ничего лишнего
+- Не включай задачи из родительского плана или соседних шагов
+- Подшаги должны быть конкретными и атомарными
+- Если шаг можно выполнить напрямую — поставь done: true и дай ответ
+- Максимум 5 подшагов — лучше меньше, но точнее
+- Возвращай ТОЛЬКО валидный JSON, без пояснений и markdown
+
+Формат ответа:
+{
+  "goal": "краткое описание цели подшага",
+  "done": false,
+  "direct_answer": "",
+  "steps": [
+    {"step_id": "s1", "title": "...", "description": "...", "priority": 1}
+  ]
+}
+
+Название каждого шага должно начинаться с действия:
+- "Объяснить: ..." — для концепций
+- "Показать код: ..." — для примеров
+- "Сравнить: ..." — для сравнений
+- "Перечислить: ..." — для списков
+"""
+
 
 def plan(task: UserTask, context: dict = None, model: str = None) -> PlanResult:
-    """
-    Строит план по задаче пользователя.
-    context: {"history": [...], "retrieval": [...]}
-    """
     context = context or {}
     prompt = _build_prompt(task.text, context)
-
     logger.info(f"[PlannerAgent] Планирую задачу: {task.text[:60]}")
-
     raw = ollama_client.ask(prompt, model=model, system=SYSTEM_PROMPT)
     return _parse_plan_result(raw)
 
+
+def subplan(step_title: str, step_description: str, parent_goal: str,
+            context: dict = None, model: str = None) -> PlanResult:
+    # subplan не получает историю — только шаг и родительскую цель
+    prompt = (
+        f"Родительская цель: {parent_goal}\n\n"
+        f"Шаг который нужно разбить: {step_title}\n"
+        f"Описание шага: {step_description}\n\n"
+        f"Разбей ТОЛЬКО этот шаг на конкретные подшаги (максимум 5). "
+        f"Не включай ничего из родительской цели кроме того, "
+        f"что напрямую относится к данному шагу."
+    )
+    # context передаём без history — только retrieval если есть
+    clean_context = {"retrieval": (context or {}).get("retrieval", [])}
+
+    logger.info(f"[PlannerAgent] Подплан для шага: {step_title[:60]}")
+    raw = ollama_client.ask(prompt, model=model, system=SYSTEM_PROMPT_SUBPLAN)
+    return _parse_plan_result(raw)
+
+
 def replan(step_id: str, feedback: str, original_goal: str,
            context: dict = None, model: str = None) -> PlanResult:
-    """
-    Перепланирует после возврата подзадачи от worker.
-    """
     context = context or {}
     prompt = (
         f"Задача: {original_goal}\n\n"
         f"Шаг '{step_id}' не удалось выполнить.\n"
-        f"Причина от worker: {feedback}\n\n"
-        f"Перестрой план с учётом этой информации."
+        f"Причина: {feedback}\n\n"
+        f"Перестрой план ТОЛЬКО для этого шага с учётом причины."
     )
-
     logger.info(f"[PlannerAgent] Перепланирование. Причина: {feedback[:60]}")
-
-    raw = ollama_client.ask(prompt, model=model, system=SYSTEM_PROMPT)
+    raw = ollama_client.ask(prompt, model=model, system=SYSTEM_PROMPT_SUBPLAN)
     return _parse_plan_result(raw)
 
 
@@ -81,9 +119,7 @@ def _build_prompt(task_text: str, context: dict) -> str:
 
 
 def _parse_plan_result(raw: str) -> PlanResult:
-    """Парсит JSON-ответ LLM в PlanResult. При ошибке — возвращает fallback."""
     try:
-        # Пробуем извлечь JSON из текста
         start = raw.find("{")
         end = raw.rfind("}") + 1
         data = json.loads(raw[start:end])

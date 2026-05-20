@@ -42,6 +42,43 @@
           <div class="topbar-title">Локальный AI-агент</div>
           <div class="topbar-subtitle" id="conversation-label">Выбери или создай беседу</div>
         </div>
+        <div class="model-dropdown-wrapper" id="modelWrapper" style="margin-left:auto">
+          <button class="model-trigger" id="modelTrigger" aria-haspopup="listbox" aria-expanded="false">
+            <span class="model-dot"></span>
+            <span class="model-name" id="triggerName">Загрузка...</span>
+            <span class="model-gpu-tag" id="triggerGpu">GPU</span>
+            <svg class="model-chevron" width="14" height="14" viewBox="0 0 16 16" fill="none"
+                 stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="4,6 8,10 12,6"/>
+            </svg>
+          </button>
+
+          <div class="model-dropdown" id="modelDropdown" role="listbox">
+            <div class="model-search-wrap">
+              <svg class="model-search-icon" width="13" height="13" viewBox="0 0 16 16" fill="none"
+                   stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <circle cx="6.5" cy="6.5" r="4.5"/><line x1="10.5" y1="10.5" x2="14" y2="14"/>
+              </svg>
+              <input class="model-search-input" id="modelSearch" type="text"
+                     placeholder="Поиск модели..." autocomplete="off" spellcheck="false">
+            </div>
+            <div class="model-scroll" id="modelScroll">
+              <ul class="model-list" id="modelList"></ul>
+              <div class="model-empty" id="modelEmpty">Модели не найдены</div>
+            </div>
+            <div class="model-footer">
+              <span class="model-footer-hint" id="modelFooterHint">—</span>
+              <button class="model-refresh-btn" id="modelRefreshBtn">
+                <svg id="modelRefreshIcon" width="11" height="11" viewBox="0 0 16 16" fill="none"
+                     stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="1,4 1,10 7,10"/>
+                  <path d="M1 10 A7 7 0 1 1 4 3.5"/>
+                </svg>
+                Обновить
+              </button>
+            </div>
+          </div>
+        </div>
       </header>
 
       <section id="messages" class="messages"></section>

@@ -39,6 +39,28 @@ def startup():
 def index(request: Request):
     return templates.TemplateResponse(request, "chat.html")
 
+@app.get("/api/models")
+async def api_get_models():
+    """Получает список моделей из Ollama"""
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get("http://localhost:11434/api/tags")
+            data = r.json()
+        models = []
+        for m in data.get("models", []):
+            size_gb = round(m.get("size", 0) / 1e9, 1)
+            models.append({
+                "id": m["name"],
+                "name": m["name"].split(":")[0],
+                "tag": m["name"].split(":")[-1] if ":" in m["name"] else "latest",
+                "size_gb": size_gb,
+                # если не влезает в 16 ГБ — пойдёт в CPU+GPU
+                "processor": "GPU" if size_gb <= 15 else "CPU+GPU",
+            })
+        return {"models": models}
+    except Exception as e:
+        return {"models": [], "error": str(e)}
 
 @app.get("/api/conversations")
 def api_list_conversations():

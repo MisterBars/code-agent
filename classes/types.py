@@ -26,6 +26,8 @@ class PlanStep:
     title: str
     description: str
     priority: int = 0
+    depth: int = 0                # уровень вложенности: 0 = корневой, 1, 2, ...
+    parent_step_id: Optional[str] = None   # id родительского шага
     status: str = "pending"       # pending / in_progress / done / failed / needs_replan
     depends_on: list = field(default_factory=list)
     tool_hint: Optional[str] = None
@@ -48,7 +50,7 @@ class PlanResult:
 @dataclass
 class WorkerResult:
     step_id: str
-    status: str                   # done / failed / needs_replan
+    status: str                   # done / failed / needs_replan / needs_clarification
     output: str = ""
     artifacts: list = field(default_factory=list)
     error: Optional[str] = None
@@ -64,7 +66,7 @@ class OrchestratorResult:
     steps_completed: int
     replans:         int
     messages_used:   int
-    message_id:      str | None = None  # ← id финального сообщения для оценки
+    message_id:      str | None = None
 
 
 # ─── RAG ──────────────────────────────────────────────────────

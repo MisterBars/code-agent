@@ -1,5 +1,6 @@
 const DEFAULT_MODEL = "qwen2.5-coder:7b";
 
+let currentModel = DEFAULT_MODEL;
 let currentConversationId  = null;
 let currentAbortController = null;
 let _sending = false;
@@ -616,12 +617,66 @@ function makeReasoningBlock() {
 
   const rLabel = rToggle.querySelector(".r-label");
 
+  // Весь накопленный текст храним отдельно
+  let _fullText = "";
+  const _queue = [];
+  let _typing = false;
+
+  function _typeNextLine() {
+    if (_queue.length === 0) {
+      _typing = false;
+      return;
+    }
+    _typing = true;
+
+    const line = _queue.shift();
+    const lineWithPrefix = (_fullText.length > 0 ? "\n" : "") + line;
+    let pos = 0;
+    const total = lineWithPrefix.length;
+
+    const timer = setInterval(() => {
+      pos = Math.min(pos + 2, total);
+      rBody.textContent = _fullText + lineWithPrefix.slice(0, pos);
+      // Автоскролл внутри блока размышлений
+      setTimeout(() => { rBody.scrollTop = rBody.scrollHeight; }, 0);
+      // Автоскролл всей области сообщений
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+
+      if (pos >= total) {
+        clearInterval(timer);
+        _fullText += lineWithPrefix; // фиксируем строку
+        _typeNextLine();
+      }
+    }, 18);
+  }
+
   function appendReasoning(line) {
-    rBody.textContent += line + "\n";
-    messagesEl.scrollTop = messagesEl.scrollHeight;
+    console.log("[reasoning]", Date.now(), line.slice(0, 40));
+    _queue.push(line);
+    if (!_typing) _typeNextLine();
   }
 
   return { agentWrap, rBlock, rBody, rLabel, appendReasoning };
+}
+
+// ── Утилита: посимвольная печать markdown ────────────────────
+function typewriterMarkdown(container, text, { charsPerTick = 3, delayMs = 25 } = {}) {
+  return new Promise((resolve) => {
+    let pos = 0;
+    const total = text.length;
+
+    const timer = setInterval(() => {
+      pos = Math.min(pos + charsPerTick, total);
+      container.innerHTML = renderMarkdown(text.slice(0, pos));
+      bindCopyButtons(container);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+
+      if (pos >= total) {
+        clearInterval(timer);
+        resolve();
+      }
+    }, delayMs);
+  });
 }
 
 // ── SSE: читает поток и обновляет reasoning-блок ──────────────
@@ -656,7 +711,7 @@ async function consumeStream(response, { rBlock, rLabel, appendReasoning }) {
           break;
         case "worker_start":
           stepsDone++;
-          stepsTotal = event.total || stepsTotal;
+          stepsTotal = event.steps_total || stepsTotal;
           rLabel.textContent = `Шаг ${stepsDone}${stepsTotal ? "/" + stepsTotal : ""}...`;
           appendReasoning(`[worker #${stepsDone}] ${event.message || ""}`);
           break;
@@ -664,7 +719,7 @@ async function consumeStream(response, { rBlock, rLabel, appendReasoning }) {
           appendReasoning(`[worker #${stepsDone}] ✓ ${event.message || ""}`);
           break;
         case "replan":
-          rLabel.textContent = "Перепланирование...";
+          rLabel.textContent = `Перепланирование (глубина ${event.depth || ""})...`;
           appendReasoning(`[replan] ${event.message || ""}`);
           break;
         case "fix_start":
@@ -680,17 +735,45 @@ async function consumeStream(response, { rBlock, rLabel, appendReasoning }) {
         case "dedup_done":
           appendReasoning(`[check] ✓ ${event.message || ""}`);
           break;
-        case "answer":
+
+        case "answer": {
+          // Текст финального ответа — поле content (не final_answer)
+          const finalText = event.content;
+
           rBlock.classList.remove("open");
-          rLabel.textContent = `Reasoning — ${stepsDone} шагов`;
+          rLabel.textContent = `Reasoning — ${stepsDone} шаг${stepsDone === 1 ? "" : stepsDone < 5 ? "а" : "ов"}`;
+
+          if (finalText) {
+            // Создаём bubble сразу и печатаем посимвольно
+            const modelLabel = document.createElement("div");
+            modelLabel.className = "model-label";
+            modelLabel.textContent = DEFAULT_MODEL;
+
+            const bubble = document.createElement("div");
+            bubble.className = "message-bubble";
+
+            const answerWrap = document.createElement("div");
+            answerWrap.className = "message orchestrator";
+            answerWrap.appendChild(modelLabel);
+            answerWrap.appendChild(bubble);
+            messagesEl.appendChild(answerWrap);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+
+            // Печатаем посимвольно
+            await typewriterMarkdown(bubble, finalText, { charsPerTick: 1, delayMs: 30 });
+          }
+
+          // После печати — тихо перезагружаем из БД
+          // (появятся кнопки 👍/👎 и "Копировать ответ")
           await loadMessages(currentConversationId);
           await loadConversations();
           break;
+        }
+
         case "done":
+          // done — финальное служебное событие, данные уже показаны в "answer"
+          // просто обновляем список бесед если вдруг answer не было
           if (!event.final_answer) break;
-          rBlock.classList.remove("open");
-          rLabel.textContent = `Reasoning — готово`;
-          await loadMessages(currentConversationId);
           await loadConversations();
           break;
       }
@@ -712,7 +795,7 @@ async function runStream({ text, conversationId, rBlock, rLabel, appendReasoning
       body: JSON.stringify({
         conversation_id: conversationId,
         text,
-        model: DEFAULT_MODEL,
+        model: currentModel,
       }),
       signal: currentAbortController.signal,
     });
@@ -860,4 +943,138 @@ if (sidebarToggle && sidebar) {
 (async function init() {
   await loadConversations();
   messagesEl.innerHTML = `<div class="empty-state">Выбери беседу слева или создай новую.</div>`;
+})();
+
+// ── Model Selector ────────────────────────────────────────────
+(function initModelSelector() {
+  const wrapper    = document.getElementById("modelWrapper");
+  const trigger    = document.getElementById("modelTrigger");
+  const dropdown   = document.getElementById("modelDropdown");
+  const searchInp  = document.getElementById("modelSearch");
+  const list       = document.getElementById("modelList");
+  const empty      = document.getElementById("modelEmpty");
+  const trigName   = document.getElementById("triggerName");
+  const trigGpu    = document.getElementById("triggerGpu");
+  const footHint   = document.getElementById("modelFooterHint");
+  const refreshBtn = document.getElementById("modelRefreshBtn");
+
+  if (!wrapper) return; // если элементов нет — не падаем
+
+  let models = [];
+  let isOpen = false;
+
+  function getIcon(name) {
+    const n = name.toLowerCase();
+    if (n.includes("32b") || n.includes("70b")) return "💎";
+    if (n.includes("22b") || n.includes("14b")) return "🔥";
+    if (n.includes("7b")  || n.includes("8b"))  return "⚡";
+    return "🧠";
+  }
+
+  function renderList(query) {
+    const q = (query || "").toLowerCase().trim();
+    const filtered = models.filter(m =>
+      m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q)
+    );
+
+    list.innerHTML = "";
+    empty.classList.toggle("visible", filtered.length === 0);
+
+    filtered.forEach(m => {
+      const li = document.createElement("li");
+      li.className = "model-item" + (m.id === currentModel ? " active" : "");
+      li.dataset.id = m.id;
+      li.setAttribute("tabindex", "0");
+      li.innerHTML = `
+        <div class="model-item-icon">${getIcon(m.id)}</div>
+        <div class="model-item-info">
+          <div class="model-item-name">${m.name}</div>
+          <div class="model-item-meta">${m.tag} · ${m.size_gb} ГБ</div>
+        </div>
+        <div class="model-item-right">
+          <span class="model-badge ${m.processor === 'GPU' ? 'gpu' : 'cpugpu'}">${m.processor}</span>
+          <svg class="model-item-check" viewBox="0 0 16 16" fill="none"
+               stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="3,8 6.5,12 13,4"/>
+          </svg>
+        </div>`;
+      li.addEventListener("click", () => selectModel(m.id));
+      li.addEventListener("keydown", e => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); selectModel(m.id); }
+      });
+      list.appendChild(li);
+    });
+
+    const n = filtered.length;
+    const word = n === 1 ? "модель" : [2,3,4].includes(n % 10) && ![12,13,14].includes(n % 100) ? "модели" : "моделей";
+    footHint.textContent = `${n} ${word} доступно`;
+  }
+
+  function selectModel(id) {
+    const m = models.find(x => x.id === id);
+    if (!m) return;
+    currentModel = id;
+    trigName.textContent = m.name;
+    trigGpu.textContent  = m.processor;
+    trigGpu.className    = m.processor === "GPU" ? "model-gpu-tag" : "model-gpu-tag cpu";
+    renderList(searchInp.value);
+    closeDropdown();
+    console.log("[ModelSelector] выбрана модель:", id);
+  }
+
+  function openDropdown() {
+    isOpen = true;
+    trigger.classList.add("open");
+    trigger.setAttribute("aria-expanded", "true");
+    dropdown.classList.add("open");
+    renderList(searchInp.value);
+    setTimeout(() => searchInp.focus(), 60);
+  }
+
+  function closeDropdown() {
+    isOpen = false;
+    trigger.classList.remove("open");
+    trigger.setAttribute("aria-expanded", "false");
+    dropdown.classList.remove("open");
+    searchInp.value = "";
+  }
+
+  async function loadModels() {
+    try {
+      const data = await api("/api/models");
+      models = data.models || [];
+      if (models.length > 0) {
+        // если текущая модель есть в списке — оставляем, иначе берём первую
+        if (!models.find(m => m.id === currentModel)) {
+          currentModel = models[0].id;
+        }
+        const active = models.find(m => m.id === currentModel);
+        if (active) {
+          trigName.textContent = active.name;
+          trigGpu.textContent  = active.processor;
+          trigGpu.className    = active.processor === "GPU" ? "model-gpu-tag" : "model-gpu-tag cpu";
+        }
+      } else {
+        trigName.textContent = DEFAULT_MODEL;
+      }
+    } catch (e) {
+      trigName.textContent = DEFAULT_MODEL;
+      console.warn("[ModelSelector] не удалось загрузить модели:", e);
+    }
+  }
+
+  trigger.addEventListener("click", e => { e.stopPropagation(); isOpen ? closeDropdown() : openDropdown(); });
+  document.addEventListener("click", e => { if (isOpen && !wrapper.contains(e.target)) closeDropdown(); });
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && isOpen) { closeDropdown(); trigger.focus(); } });
+  searchInp.addEventListener("input", () => renderList(searchInp.value));
+
+  refreshBtn.addEventListener("click", async () => {
+    refreshBtn.classList.add("spinning");
+    await loadModels();
+    renderList(searchInp.value);
+    refreshBtn.classList.remove("spinning");
+  });
+
+  // Загружаем при старте
+  loadModels();
 })();
