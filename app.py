@@ -42,36 +42,33 @@ def index(request: Request):
 @app.get("/api/models")
 async def api_get_models():
     """Получает список моделей из Ollama"""
-    import httpx
+    import urllib.request
+    import urllib.error
+    import json as _json
 
     urls = [
         "http://127.0.0.1:11434/api/tags",
         "http://localhost:11434/api/tags",
-        "http://ollama:11434/api/tags",
     ]
 
     last_error = None
     for url in urls:
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                r = await client.get(url)
-                r.raise_for_status()
-                data = r.json()
+            req = urllib.request.Request(url, headers={"Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = _json.loads(resp.read().decode())
 
             models = []
             for m in data.get("models", []):
                 full_name = m.get("name", "")
-                size_gb = round(m.get("size", 0) / 1024 / 1024 / 1024, 1)
-
-                parts = full_name.split(":")
-                base_name = parts[0] if parts else full_name
-                tag = parts[1] if len(parts) > 1 else "latest"
-
+                size_gb   = round(m.get("size", 0) / 1024 / 1024 / 1024, 1)
+                parts     = full_name.split(":")
+                tag       = parts[1] if len(parts) > 1 else "latest"
                 models.append({
-                    "id": full_name,
-                    "name": full_name,
-                    "tag": tag,
-                    "size_gb": size_gb,
+                    "id":        full_name,
+                    "name":      full_name,
+                    "tag":       tag,
+                    "size_gb":   size_gb,
                     "processor": "GPU" if size_gb <= 15.0 else "CPU+GPU",
                 })
 
@@ -79,8 +76,9 @@ async def api_get_models():
 
         except Exception as e:
             last_error = str(e)
+            continue
 
-    return {"models": [], "error": last_error or "Не удалось подключиться к Ollama"}
+    return {"models": [], "error": last_error or "Ollama недоступна"}
 
 @app.get("/api/conversations")
 def api_list_conversations():
