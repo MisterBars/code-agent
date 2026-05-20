@@ -809,7 +809,7 @@ async function consumeStream(response, { rBlock, rBody, rLabel, appendReasoning 
 }
 
 // ── Единая функция SSE-стрима ─────────────────────────────────
-async function runStream({ text, conversationId, rBlock, rLabel, appendReasoning, onAbort }) {
+async function runStream({ text, conversationId, rBlock, rBody, rLabel, appendReasoning, onAbort }) {
   if (currentAbortController) currentAbortController.abort();
   currentAbortController = new AbortController();
 

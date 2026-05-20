@@ -191,38 +191,67 @@ body { min-height: 100vh; }
 }
 
 /* ── Reasoning block ─────────────────────────────────────────── */
-.reasoning-block  { border: 1px solid #1e232c; border-radius: 12px; overflow: hidden; margin-bottom: 8px; }
-.reasoning-toggle {
-  display: flex; align-items: center; gap: 8px; padding: 8px 14px;
-  background: #13161d; cursor: pointer; user-select: none;
-  font-size: 12px; color: #6e7a8a; border: none; width: 100%; text-align: left; transition: background 0.12s;
-  pointer-events: auto !important; cursor: pointer;;
+/* ── Reasoning block ─────────────────────────────────────────── */
+.reasoning-block {
+  border: 1px solid #1e232c;
+  border-radius: 12px;
+  overflow: hidden;
+  margin-bottom: 8px;
 }
-.reasoning-toggle:hover  { background: #1a1e27; }
-.reasoning-toggle .arrow { display: inline-block; transition: transform 0.18s; font-style: normal; font-size: 10px; }
-.reasoning-block.open .reasoning-toggle .arrow { transform: rotate(90deg); }
-.reasoning-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
-.dot-planner   { background: #c9941a; }
-.dot-worker    { background: #2aaa65; }
-.reasoning-body {
-  display: none; padding: 12px 14px; background: #0c0f14;
-  font-size: 12px; font-family: 'Cascadia Code',Consolas,monospace;
-  color: #7a8a9a; white-space: pre-wrap; line-height: 1.55;
-  border-top: 1px solid #1e232c; max-height: 420px; overflow-y: auto;
-  pointer-events: auto;display: block;
-}
-.reasoning-body[hidden] { display: none !important; }
-.reasoning-block.open .reasoning-body { display: block; }
+
 .reasoning-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 6px;
+  background: #13161d;
+}
+
+.reasoning-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: transparent;
+  border: none;
+  width: 100%;
+  text-align: left;
+  font-size: 12px;
+  color: #6e7a8a;
+  user-select: none;
+  transition: background 0.12s;
+  cursor: pointer;
+  pointer-events: auto !important;
+}
+
+.reasoning-header:hover .reasoning-toggle {
+  background: #1a1e27;
 }
 
 .reasoning-header .reasoning-toggle {
   flex: 1;
-  text-align: left;
+  min-width: 0;
 }
+
+.reasoning-toggle .arrow {
+  display: inline-block;
+  transition: transform 0.18s;
+  font-style: normal;
+  font-size: 10px;
+}
+
+.reasoning-block.open .reasoning-toggle .arrow {
+  transform: rotate(90deg);
+}
+
+.reasoning-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dot-planner { background: #c9941a; }
+.dot-worker  { background: #2aaa65; }
 
 .reasoning-copy-btn {
   flex-shrink: 0;
@@ -231,13 +260,14 @@ body { min-height: 100vh; }
   justify-content: center;
   width: 28px;
   height: 28px;
+  margin-right: 10px;
   border-radius: 6px;
-  color: var(--color-text-muted, #6e7a8a);
   background: transparent;
-  border: none;
+  border: 1px solid #2a303b;
+  color: #6e7a8a;
   cursor: pointer;
   opacity: 0;
-  transition: opacity 0.15s, color 0.15s, background 0.15s;
+  transition: opacity 0.15s, color 0.15s, background 0.15s, border-color 0.15s;
 }
 
 .reasoning-block:hover .reasoning-copy-btn {
@@ -247,10 +277,30 @@ body { min-height: 100vh; }
 .reasoning-copy-btn:hover {
   color: #b0c8e8;
   background: rgba(255,255,255,0.06);
+  border-color: #4d85c0;
 }
 
-/* Скрытый rBody через hidden атрибут */
-.reasoning-body[hidden] { display: none !important; }
+.reasoning-body {
+  padding: 12px 14px;
+  background: #0c0f14;
+  font-size: 12px;
+  font-family: 'Cascadia Code', Consolas, monospace;
+  color: #7a8a9a;
+  white-space: pre-wrap;
+  line-height: 1.55;
+  border-top: 1px solid #1e232c;
+  max-height: 420px;
+  overflow-y: auto;
+  pointer-events: auto;
+}
+
+.reasoning-block.open .reasoning-body {
+  display: block;
+}
+
+[hidden] {
+  display: none !important;
+}
 
 /* ── Model label (в сообщениях) ──────────────────────────────── */
 .model-label {
