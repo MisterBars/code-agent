@@ -43,24 +43,44 @@ def index(request: Request):
 async def api_get_models():
     """Получает список моделей из Ollama"""
     import httpx
-    try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            r = await client.get("http://localhost:11434/api/tags")
-            data = r.json()
-        models = []
-        for m in data.get("models", []):
-            size_gb = round(m.get("size", 0) / 1e9, 1)
-            models.append({
-                "id": m["name"],
-                "name": m["name"].split(":")[0],
-                "tag": m["name"].split(":")[-1] if ":" in m["name"] else "latest",
-                "size_gb": size_gb,
-                # если не влезает в 16 ГБ — пойдёт в CPU+GPU
-                "processor": "GPU" if size_gb <= 15 else "CPU+GPU",
-            })
-        return {"models": models}
-    except Exception as e:
-        return {"models": [], "error": str(e)}
+
+    urls = [
+        "http://127.0.0.1:11434/api/tags",
+        "http://localhost:11434/api/tags",
+        "http://ollama:11434/api/tags",
+    ]
+
+    last_error = None
+    for url in urls:
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                r = await client.get(url)
+                r.raise_for_status()
+                data = r.json()
+
+            models = []
+            for m in data.get("models", []):
+                full_name = m.get("name", "")
+                size_gb = round(m.get("size", 0) / 1024 / 1024 / 1024, 1)
+
+                parts = full_name.split(":")
+                base_name = parts[0] if parts else full_name
+                tag = parts[1] if len(parts) > 1 else "latest"
+
+                models.append({
+                    "id": full_name,
+                    "name": full_name,
+                    "tag": tag,
+                    "size_gb": size_gb,
+                    "processor": "GPU" if size_gb <= 15.0 else "CPU+GPU",
+                })
+
+            return {"models": models}
+
+        except Exception as e:
+            last_error = str(e)
+
+    return {"models": [], "error": last_error or "Не удалось подключиться к Ollama"}
 
 @app.get("/api/conversations")
 def api_list_conversations():

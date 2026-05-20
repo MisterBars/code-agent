@@ -30,20 +30,23 @@
 
     <main class="main">
       <header class="topbar">
-        <!-- Кнопка-бургер — видна только на мобильном -->
-        <button id="sidebar-toggle" class="sidebar-toggle" aria-label="Открыть список бесед">
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-            <line x1="2" y1="4" x2="16" y2="4"/>
-            <line x1="2" y1="9" x2="16" y2="9"/>
-            <line x1="2" y1="14" x2="16" y2="14"/>
-          </svg>
-        </button>
-        <div class="topbar-info">
-          <div class="topbar-title">Локальный AI-агент</div>
-          <div class="topbar-subtitle" id="conversation-label">Выбери или создай беседу</div>
+        <div class="topbar-left">
+          <button id="sidebar-toggle" class="sidebar-toggle" aria-label="Открыть список бесед">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <line x1="2" y1="4" x2="16" y2="4"/>
+              <line x1="2" y1="9" x2="16" y2="9"/>
+              <line x1="2" y1="14" x2="16" y2="14"/>
+            </svg>
+          </button>
+
+          <div class="topbar-info">
+            <div class="topbar-title">Локальный AI-агент</div>
+            <div class="topbar-subtitle" id="conversation-label">Выбери или создай беседу</div>
+          </div>
         </div>
-        <div class="model-dropdown-wrapper" id="modelWrapper" style="margin-left:auto">
-          <button class="model-trigger" id="modelTrigger" aria-haspopup="listbox" aria-expanded="false">
+
+        <div class="model-dropdown-wrapper" id="modelWrapper">
+          <button class="model-trigger" id="modelTrigger" aria-haspopup="listbox" aria-expanded="false" type="button">
             <span class="model-dot"></span>
             <span class="model-name" id="triggerName">Загрузка...</span>
             <span class="model-gpu-tag" id="triggerGpu">GPU</span>
@@ -57,18 +60,21 @@
             <div class="model-search-wrap">
               <svg class="model-search-icon" width="13" height="13" viewBox="0 0 16 16" fill="none"
                    stroke="currentColor" stroke-width="2" stroke-linecap="round">
-                <circle cx="6.5" cy="6.5" r="4.5"/><line x1="10.5" y1="10.5" x2="14" y2="14"/>
+                <circle cx="6.5" cy="6.5" r="4.5"/>
+                <line x1="10.5" y1="10.5" x2="14" y2="14"/>
               </svg>
               <input class="model-search-input" id="modelSearch" type="text"
                      placeholder="Поиск модели..." autocomplete="off" spellcheck="false">
             </div>
-            <div class="model-scroll" id="modelScroll">
+
+            <div class="model-scroll">
               <ul class="model-list" id="modelList"></ul>
               <div class="model-empty" id="modelEmpty">Модели не найдены</div>
             </div>
+
             <div class="model-footer">
               <span class="model-footer-hint" id="modelFooterHint">—</span>
-              <button class="model-refresh-btn" id="modelRefreshBtn">
+              <button class="model-refresh-btn" id="modelRefreshBtn" type="button">
                 <svg id="modelRefreshIcon" width="11" height="11" viewBox="0 0 16 16" fill="none"
                      stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
                   <polyline points="1,4 1,10 7,10"/>
